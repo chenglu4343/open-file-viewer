@@ -14,6 +14,7 @@ import {
   resolveFormat
 } from "./utils";
 import { renderPdfDocumentPreview, type PdfPluginOptions } from "./pdf";
+import { capturePageScrollAnchor, restorePageScrollAnchor, type PageScrollAnchor } from "./page-scroll";
 import { parseLegacyWordDocument, renderLegacyWordDocument } from "./msdoc";
 import { parseWord2003XmlDocument, renderWord2003XmlDocument } from "./wordml";
 import {
@@ -192,6 +193,7 @@ export function officePlugin(options: OfficePluginOptions = {}): PreviewPlugin {
       const wordXml = packageFormat || wordHtml ? undefined : detectWord2003XmlDocument(extension, arrayBuffer);
       let disposeDocxFit: (() => void) | undefined;
       let disposeLegacyPresentation: (() => void) | undefined;
+      let disposePptx: (() => void) | undefined;
       let delegatedInstance: PreviewInstance | undefined;
 
       const conversionContext = wordXml ? undefined : await createOfficeConversionContext(ctx, arrayBuffer, extension, packageFormat);
@@ -206,7 +208,7 @@ export function officePlugin(options: OfficePluginOptions = {}): PreviewPlugin {
       } else if (packageFormat === "xlsx" && !sheetExtensions.has(extension)) {
         await renderSheet(panel, arrayBuffer, "xlsx", ctx.options.messages);
       } else if (packageFormat === "pptx" && !["pptx", "pptm", "ppsx", "ppsm", "potx", "potm"].includes(extension)) {
-        await renderPptx(panel, arrayBuffer);
+        disposePptx = await renderPptx(panel, arrayBuffer);
       } else if (fileIsDocx(extension)) {
         disposeDocxFit = await renderDocx(panel, arrayBuffer, ctx.options.fit, options.docx);
       } else if (extension === "rtf") {
@@ -225,7 +227,7 @@ export function officePlugin(options: OfficePluginOptions = {}): PreviewPlugin {
       } else if (sheetExtensions.has(extension)) {
         await renderSheet(panel, arrayBuffer, extension, ctx.options.messages);
       } else if (["pptx", "pptm", "ppsx", "ppsm", "potx", "potm"].includes(extension)) {
-        await renderPptx(panel, arrayBuffer);
+        disposePptx = await renderPptx(panel, arrayBuffer);
       } else if (extension === "odp") {
         await renderOdp(panel, arrayBuffer);
       } else if (extension === "fodp") {
@@ -279,6 +281,7 @@ export function officePlugin(options: OfficePluginOptions = {}): PreviewPlugin {
           controller?.destroy();
           disposeDocxFit?.();
           disposeLegacyPresentation?.();
+          disposePptx?.();
           panel.remove();
         }
       };
@@ -423,7 +426,15 @@ function createOfficeZoomController(
   }
 
   let zoom = getInitialZoom(ctx, 0.5, 3);
+  const presentationPages = () => Array.from(
+    panel.querySelectorAll<HTMLElement>(
+      ".ofv-pptx-viewer > div[data-slide-index], .ofv-ppt-binary-slide, .ofv-slide"
+    )
+  );
   const apply = () => {
+    const pages = presentationPages();
+    const scroller = getPresentationScroller(panel);
+    const anchor = capturePageScrollAnchor(scroller, pages);
     panel.style.setProperty("--ofv-office-zoom", String(zoom));
     panel.dispatchEvent(new CustomEvent("ofv-office-zoom"));
     for (const slide of panel.querySelectorAll<HTMLElement>(".ofv-pptx-viewer > div[data-slide-index]")) {
@@ -443,8 +454,10 @@ function createOfficeZoomController(
       syncSheetTableZoom(scrollBox, zoom);
     }
     ctx.toolbar?.setZoom(zoom);
+    restorePageScrollAnchor(scroller, pages, anchor);
   };
   apply();
+  panel.addEventListener("ofv-pptx-render-complete", apply);
 
   return {
     canCommand(command) {
@@ -469,9 +482,23 @@ function createOfficeZoomController(
       return false;
     },
     destroy() {
+      panel.removeEventListener("ofv-pptx-render-complete", apply);
       ctx.toolbar?.setZoom(undefined);
     }
   };
+}
+
+function getPresentationScroller(panel: HTMLElement): HTMLElement {
+  const viewport = panel.closest<HTMLElement>(".ofv-viewport") || panel;
+  let element = panel.querySelector<HTMLElement>(".ofv-pptx-viewer") || panel;
+  while (element !== viewport) {
+    if (
+      element.clientHeight > 0 && element.scrollHeight > element.clientHeight &&
+      /auto|scroll/.test(getComputedStyle(element).overflowY)
+    ) return element;
+    element = element.parentElement || viewport;
+  }
+  return viewport;
 }
 
 function setElementZoom(element: HTMLElement, value: string): void {
@@ -6621,7 +6648,7 @@ function encodeA1(rowIndex: number, columnIndex: number): string {
   return `${column}${rowIndex + 1}`;
 }
 
-async function renderPptx(panel: HTMLElement, arrayBuffer: ArrayBuffer): Promise<void> {
+async function renderPptx(panel: HTMLElement, arrayBuffer: ArrayBuffer): Promise<(() => void) | undefined> {
   const container = document.createElement("div");
   container.className = "ofv-pptx-viewer";
   let insight: PresentationInsight | undefined;
@@ -6676,7 +6703,34 @@ async function renderPptx(panel: HTMLElement, arrayBuffer: ArrayBuffer): Promise
   panel.append(container);
   try {
     const { PptxViewer } = await import("@aiden0z/pptx-renderer");
-    await withTimeout(PptxViewer.open(renderBuffer, container), pptxRenderTimeoutMs());
+    let scrollAnchor: PageScrollAnchor | undefined;
+    let scroller = getPresentationScroller(panel);
+    const pages = () => Array.from(container.querySelectorAll<HTMLElement>(":scope > div[data-slide-index]"));
+    // Adaptive fitting clears the slide list. Capture before that happens and
+    // restore after both the renderer's fit scale and our toolbar zoom apply.
+    const pptxViewer = await withTimeout(PptxViewer.open(renderBuffer, container, {
+      scrollContainer: scroller,
+      onRenderStart() {
+        scroller = getPresentationScroller(panel);
+        scrollAnchor = capturePageScrollAnchor(scroller, pages());
+      },
+      onRenderComplete() {
+        normalizePptxLayout(
+          container,
+          placeholderFontCorrections,
+          autofitLineHeightCorrections,
+          shapeFillCorrections,
+          autoNumberingCorrections,
+          autofitWrapCorrections,
+          textAlignmentCorrections,
+          imageClipCorrections,
+          transparentChartCorrections
+        );
+        panel.dispatchEvent(new CustomEvent("ofv-pptx-render-complete"));
+        restorePageScrollAnchor(scroller, pages(), scrollAnchor);
+        scrollAnchor = undefined;
+      }
+    }), pptxRenderTimeoutMs());
     schedulePptxLayoutNormalization(
       container,
       placeholderFontCorrections,
@@ -6688,6 +6742,7 @@ async function renderPptx(panel: HTMLElement, arrayBuffer: ArrayBuffer): Promise
       imageClipCorrections,
       transparentChartCorrections
     );
+    return () => pptxViewer?.destroy();
   } catch (error) {
     container.replaceChildren();
     if (insight) {

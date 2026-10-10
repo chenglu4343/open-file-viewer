@@ -75,7 +75,7 @@ const renderDocxAsync = vi.hoisted(() =>
   })
 );
 const openPptx = vi.hoisted(() =>
-  vi.fn(async (_data: unknown, container: HTMLElement) => {
+  vi.fn(async (_data: unknown, container: HTMLElement, _options?: unknown) => {
     const wrapper = document.createElement("div");
     wrapper.dataset.slideIndex = "0";
     const viewport = document.createElement("div");
@@ -375,11 +375,11 @@ vi.mock("mammoth", () => ({
 
 vi.mock("@aiden0z/pptx-renderer", () => ({
   PptxViewer: {
-    open: vi.fn((data: unknown, container: HTMLElement) => {
+    open: vi.fn((data: unknown, container: HTMLElement, options?: unknown) => {
       if (pptxRenderMode.value === "hang") {
         return new Promise(() => undefined);
       }
-      return openPptx(data, container);
+      return openPptx(data, container, options);
     })
   }
 }));
@@ -3574,6 +3574,56 @@ describe("officePlugin", () => {
     expect(transparentChart?.querySelector<HTMLElement>("[_echarts_instance_] > div")?.style.backgroundColor).toBe(
       "transparent"
     );
+  });
+
+  it("restores PPTX reading position and zoom after an adaptive rerender", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const viewer = createViewer({ container, file: await createMinimalPptx(),
+      fileName: "reading-position.pptx", toolbar: true, plugins: [officePlugin()] });
+    await waitFor(() => Boolean(container.querySelector(".ofv-pptx-viewer > div[data-slide-index]")));
+    const viewport = container.querySelector<HTMLElement>(".ofv-viewport")!;
+    const deck = container.querySelector<HTMLElement>(".ofv-pptx-viewer")!;
+    // Add pages to the renderer fixture and emulate their scaled layout.
+    for (let index = 1; index < 5; index += 1) {
+      const slide = deck.firstElementChild!.cloneNode(true) as HTMLElement;
+      slide.dataset.slideIndex = String(index);
+      deck.append(slide);
+    }
+    let fitScale = 1;
+    vi.spyOn(viewport, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 800, 600));
+    const originalRect = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.parentElement === deck && this.hasAttribute("data-slide-index")) {
+        const zoom = Number.parseFloat(this.style.zoom) || 1;
+        const height = 540 * fitScale * zoom;
+        return new DOMRect(0, Number(this.dataset.slideIndex) * (height + 20) - viewport.scrollTop, 800, height);
+      }
+      return originalRect.call(this);
+    });
+    viewport.scrollTop = 2 * 560 + 540 * 0.25;
+    const assertPosition = () => {
+      const slide = deck.children[2] as HTMLElement;
+      const rect = slide.getBoundingClientRect();
+      expect(-rect.top / rect.height).toBeCloseTo(0.25);
+    };
+    for (const label of ["Zoom in", "Zoom out", "Zoom in"]) {
+      container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!.click();
+      assertPosition();
+    }
+    const hooks = openPptx.mock.calls.at(-1)![2] as { onRenderStart(): void; onRenderComplete(): void };
+    for (const scale of [1.6, 1]) {
+      hooks.onRenderStart();
+      const slides = Array.from(deck.children).map((slide) => slide.cloneNode(true) as HTMLElement);
+      deck.replaceChildren();
+      viewport.scrollTop = 0;
+      fitScale = scale;
+      for (const slide of slides) { slide.style.zoom = ""; deck.append(slide); }
+      hooks.onRenderComplete();
+      assertPosition();
+      expect((deck.children[2] as HTMLElement).style.zoom).toBe("1.12");
+    }
+    viewer.destroy();
   });
 
   it("responds to shared toolbar zoom for PPTX previews", async () => {

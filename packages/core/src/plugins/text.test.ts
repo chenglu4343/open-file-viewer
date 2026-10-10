@@ -214,6 +214,79 @@ describe("textPlugin", () => {
     expect(reset.textContent).toBe("150%");
   });
 
+  it("numbers each Markdown code block and copies only its highlighted source", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    const first = "const value = '<tag>';\n\nconsole.log(value);\n";
+    const second = "  unrecognized syntax\nnext line\n";
+    createViewer({ container, file: new Blob([
+      "Inline `code`\n\n```js\n" + first + "```\n\n```unknown-language\n" + second + "```"
+    ], { type: "text/markdown" }), fileName: "blocks.md", plugins: [textPlugin()] });
+    await waitFor(() => container.querySelectorAll(".ofv-markdown-code-copy").length === 2);
+    const blocks = container.querySelectorAll<HTMLElement>(".ofv-markdown-code-block");
+    expect(blocks[0].querySelector(".ofv-markdown-code-gutter")?.textContent).toBe("1\n2\n3");
+    expect(blocks[1].querySelector(".ofv-markdown-code-gutter")?.textContent).toBe("1\n2");
+    expect(blocks[0].querySelector(".ofv-markdown-code-gutter")?.getAttribute("aria-hidden")).toBe("true");
+    expect(blocks[0].querySelector("code .token.keyword")).not.toBeNull();
+    expect(container.querySelector("p code")?.textContent).toBe("code");
+    expect(container.querySelector("p .ofv-markdown-code-copy")).toBeNull();
+    for (const [index, source] of [first, second].entries()) {
+      blocks[index].querySelector<HTMLButtonElement>("button")!.click();
+      await waitFor(() => blocks[index].querySelector('[role="status"]')?.textContent === "Copied");
+      expect(writeText).toHaveBeenNthCalledWith(index + 1, source);
+    }
+  });
+
+  it("uses custom Markdown copy messages and reports clipboard errors", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    vi.stubGlobal("navigator", { clipboard: { writeText: vi.fn().mockRejectedValue(new Error("denied")) } });
+    createViewer({ container, file: new Blob(["```\none\n```"], { type: "text/markdown" }),
+      fileName: "copy.md", plugins: [textPlugin()],
+      messages: { textCopy: "Duplicate", textCopyFailed: "Unavailable" } });
+    const copy = await waitFor(() => container.querySelector<HTMLButtonElement>(".ofv-markdown-code-copy"));
+    expect(copy.textContent).toBe("Duplicate");
+    copy.click();
+    expect(copy.disabled).toBe(true);
+    await waitFor(() => container.querySelector(".ofv-markdown-code-status")?.textContent === "Unavailable");
+    expect(copy.disabled).toBe(false);
+  });
+
+  it("copies Markdown code using the legacy clipboard fallback", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    vi.stubGlobal("navigator", { clipboard: undefined });
+    const execCommand = vi.fn(() => {
+      expect(document.querySelector("textarea")?.value).toBe("legacy\n");
+      return true;
+    });
+    Object.defineProperty(document, "execCommand", { configurable: true, value: execCommand });
+    try {
+      createViewer({ container, file: new Blob(["```\nlegacy\n```"], { type: "text/markdown" }),
+        fileName: "legacy.md", locale: "zh-CN", plugins: [textPlugin()] });
+      const copy = await waitFor(() => container.querySelector<HTMLButtonElement>(".ofv-markdown-code-copy"));
+      expect(copy.textContent).toBe("复制");
+      copy.click();
+      await waitFor(() => container.querySelector(".ofv-markdown-code-status")?.textContent === "已复制");
+      expect(execCommand).toHaveBeenCalledWith("copy");
+      expect(document.querySelector("textarea")).toBeNull();
+    } finally {
+      delete (document as Partial<Document>).execCommand;
+    }
+  });
+
+  it("counts indented code and empty lines without adding a row for the final newline", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    createViewer({ container, file: new Blob(["    first\n    \n    third\n\n```\n\n```"], { type: "text/markdown" }),
+      fileName: "indented.md", plugins: [textPlugin()] });
+    await waitFor(() => container.querySelectorAll(".ofv-markdown-code-gutter").length === 2);
+    expect(Array.from(container.querySelectorAll(".ofv-markdown-code-gutter"), (gutter) => gutter.textContent))
+      .toEqual(["1\n2\n3", "1"]);
+  });
+
   it("renders mermaid code fences as diagrams", async () => {
     mermaidRender.mockResolvedValue({ svg: "<svg><g><text>A to B</text></g></svg>" });
     const container = document.createElement("div");
@@ -236,6 +309,8 @@ describe("textPlugin", () => {
     );
     expect(container.querySelector("code.language-mermaid")).toBeNull();
     expect(container.querySelector("code.language-js")).not.toBeNull();
+    await waitFor(() => container.querySelectorAll(".ofv-markdown-code-copy").length === 1);
+    expect(container.querySelector(".ofv-mermaid .ofv-markdown-code-copy")).toBeNull();
   });
 
   it("sanitizes mermaid svg output before inserting it", async () => {

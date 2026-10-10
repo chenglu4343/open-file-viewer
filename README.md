@@ -407,6 +407,8 @@ Preview quality for complex formats depends on browser capabilities, file struct
 
 Legacy `ppt` / `pps` files use a local OLE and PowerPoint Binary File Format preview path. It restores slide geometry, positioned text, master bitmap artwork, JPEG/PNG/TIFF assets, and common compressed EMF/WMF graphics without uploading the file. Unsupported drawing records fall back gracefully; use `officePlugin({ convert })` when pixel-identical Office rendering is required.
 
+Markdown code blocks display line numbers and a copy button in the upper-right corner. Copying preserves the code text and excludes line numbers; button labels and feedback use the existing `textCopy`, `textCopied`, and `textCopyFailed` messages.
+
 Plugin order matters because the first matching plugin renders the file. For example, `csv` and `tsv` can match both `textPlugin()` and `officePlugin()`; place `officePlugin()` earlier if you want spreadsheet-style table preview.
 
 ### DWG / DWF Preview Model

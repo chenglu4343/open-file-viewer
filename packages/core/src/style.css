@@ -6042,6 +6042,55 @@ a.ofv-xmind-topic-title:hover {
   border: 0;
 }
 
+.ofv-markdown-code-block {
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+  margin-bottom: 16px;
+}
+
+.ofv-markdown-body pre.ofv-markdown-code-pre {
+  display: flex;
+  gap: 16px;
+  margin: 0;
+  padding-top: 48px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.ofv-markdown-code-pre > code {
+  flex: 1 0 auto;
+  line-height: inherit;
+}
+
+.ofv-markdown-code-gutter {
+  flex: 0 0 auto;
+  min-width: 2ch;
+  padding-right: 12px;
+  border-right: 1px solid var(--ofv-border);
+  color: var(--ofv-text-muted);
+  line-height: inherit;
+  text-align: right;
+  white-space: pre;
+  user-select: none;
+}
+
+.ofv-markdown-code-toolbar {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 16px);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.ofv-markdown-code-status {
+  color: var(--ofv-text-muted);
+}
+
 .ofv-markdown-body .ofv-mermaid,
 .ofv-mermaid-file .ofv-mermaid {
   display: flex;

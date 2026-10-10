@@ -384,6 +384,63 @@ describe("pdfPlugin", () => {
     viewer.destroy();
   });
 
+  it("preserves the visible page and its reading offset through zoom and resize", async () => {
+    vi.stubGlobal("IntersectionObserver", undefined);
+    const container = createSizedContainer();
+    const viewer = createViewer({
+      container, file: new Blob(["pdf"], { type: "application/pdf" }),
+      fileName: "reading-position.pdf", toolbar: true,
+      plugins: [pdfPlugin({ pdfjs: createPdfJsMock({ numPages: 6 }) })]
+    });
+    await waitFor(() => container.querySelectorAll(".ofv-pdf-page-wrapper").length === 6);
+    const scroller = container.querySelector<HTMLElement>(".ofv-pdf-pages")!;
+    Object.defineProperty(scroller, "clientWidth", { configurable: true, get: () => 800 });
+    Object.defineProperty(scroller, "clientHeight", { configurable: true, get: () => 550 });
+    const originalRect = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this === scroller) return new DOMRect(0, 40, 800, 550);
+      if (this.classList.contains("ofv-pdf-page-wrapper")) {
+        const siblings = Array.from(scroller.children) as HTMLElement[];
+        const top = 16 + siblings.slice(0, siblings.indexOf(this))
+          .reduce((sum, page) => sum + parseCssPx(page.style.height) + 16, 0);
+        return new DOMRect(0, 40 + top - scroller.scrollTop,
+          parseCssPx(this.style.width), parseCssPx(this.style.height));
+      }
+      return originalRect.call(this);
+    });
+    // jsdom does not clamp scrollTop when content is removed; emulate the browser.
+    const replaceChildren = scroller.replaceChildren.bind(scroller);
+    vi.spyOn(scroller, "replaceChildren").mockImplementation((...nodes) => {
+      replaceChildren(...nodes);
+      scroller.scrollTop = 0;
+    });
+    viewer.resize();
+    const initialWrapper = scroller.firstElementChild;
+    await waitFor(() => scroller.firstElementChild !== initialWrapper);
+    const page = scroller.children[3] as HTMLElement;
+    scroller.scrollTop = page.getBoundingClientRect().top - 40 + parseCssPx(page.style.height) * 0.3;
+    scroller.dispatchEvent(new Event("scroll"));
+    const assertPosition = () => {
+      const current = scroller.children[3] as HTMLElement;
+      expect((40 - current.getBoundingClientRect().top) / parseCssPx(current.style.height)).toBeCloseTo(0.3);
+      expect(container.querySelector<HTMLInputElement>(".ofv-pdf-page-navigator input")?.value).toBe("4");
+    };
+    for (const label of ["Zoom in", "Zoom out", "Reset zoom"]) {
+      container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!.click();
+      scroller.dispatchEvent(new Event("scroll"));
+      assertPosition();
+    }
+    for (const width of [1200, 800]) {
+      Object.defineProperty(scroller, "clientWidth", { configurable: true, get: () => width });
+      const previousWrapper = scroller.firstElementChild;
+      viewer.resize();
+      await waitFor(() => scroller.firstElementChild !== previousWrapper);
+      scroller.dispatchEvent(new Event("scroll"));
+      assertPosition();
+    }
+    viewer.destroy();
+  });
+
   it("lays out PDF pages and responds to zoom commands", async () => {
     const container = createSizedContainer();
     const objectUrl = "blob:ofv-pdf";

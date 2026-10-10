@@ -3,6 +3,7 @@ import { defaultMessages, formatPreviewMessage } from "../messages";
 import type { PreviewCommand, PreviewFit, PreviewInstance, PreviewMessages, PreviewPlugin, PreviewSize } from "../types";
 import { createEncryptedFallback, isEncryptedError } from "./encrypted";
 import { getInitialZoom } from "./utils";
+import { capturePageScrollAnchor, restorePageScrollAnchor } from "./page-scroll";
 
 type PdfJsModule = typeof import("pdfjs-dist");
 export type PdfWebFallbackScripts = "auto" | "never" | "always";
@@ -410,7 +411,16 @@ export async function renderPdfDocumentPreview(
         const page = await loadPage(pageIdx);
         if (!isCurrentRender()) return;
         const meta = pagesMeta[pageIdx];
+        const wrappers = pageStates.map((state) => state.wrapper);
+        const scrollAnchor = capturePageScrollAnchor(scroller, wrappers);
+        const previousHeight = state.wrapper.style.height;
         updatePageWrapperDimensions(state.wrapper, meta, size);
+        // Metadata for a preceding page can change the document height. Avoid
+        // writing scrollTop for unchanged/offscreen pages: that cancels smooth
+        // navigation that may still be in progress.
+        if (scrollAnchor && pageIdx <= scrollAnchor.index && state.wrapper.style.height !== previousHeight) {
+          restorePageScrollAnchor(scroller, wrappers, scrollAnchor);
+        }
         updateSummary();
         const scale = resolvePdfPageScale(
           meta,
@@ -519,6 +529,7 @@ export async function renderPdfDocumentPreview(
 
   const renderLayout = (size: PreviewSize) => {
     if (destroyed) return;
+    const scrollAnchor = capturePageScrollAnchor(scroller, pageStates.map((state) => state.wrapper));
     const activeLayoutVersion = ++layoutVersion;
     observer?.disconnect();
     observer = null;
@@ -578,11 +589,14 @@ export async function renderPdfDocumentPreview(
       }
     }
 
+    restorePageScrollAnchor(scroller, pageStates.map((state) => state.wrapper), scrollAnchor);
+
     const eagerPages = new Set<number>();
     for (let i = 0; i < Math.min(2, pdfDocument.numPages); i += 1) {
       eagerPages.add(i);
     }
     eagerPages.add(currentPage - 1);
+    if (scrollAnchor) eagerPages.add(scrollAnchor.index);
     eagerPages.forEach((pageIdx) => void renderPage(pageIdx, size));
     goToPage(currentPage, false);
   };

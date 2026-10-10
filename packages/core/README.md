@@ -246,6 +246,10 @@ The check normalizes the source exactly like `createViewer()` and evaluates
 Keep the plugin order identical to the viewer configuration; a matching
 `fallbackPlugin()` is terminal and must not be placed before native plugins.
 
+### Markdown code blocks
+
+Markdown code blocks display line numbers and a copy button in the upper-right corner. Copying preserves the code text and excludes line numbers; button labels and feedback use the existing `textCopy`, `textCopied`, and `textCopyFailed` messages.
+
 ### PDF loading compatibility
 
 If PDF preview falls back in Umi Max, utoo pack or similar build environments and the console shows

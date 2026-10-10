@@ -266,6 +266,7 @@ export function textPlugin(): PreviewPlugin {
           console.warn("Prism highlight for markdown failed:", e);
         }
 
+        addMarkdownCodeControls(container, ctx.options.messages);
         const markdownZoom = createTextZoomController(container, "--ofv-markdown-zoom", ctx, markdownContent);
 
         return {
@@ -437,6 +438,49 @@ export function textPlugin(): PreviewPlugin {
       };
     }
   };
+}
+
+function addMarkdownCodeControls(container: HTMLElement, messages: PreviewMessages): void {
+  for (const code of container.querySelectorAll<HTMLElement>("pre > code")) {
+    const pre = code.parentElement!;
+    // Capture just the source, so copying never includes line numbers or UI text.
+    const source = code.textContent || "";
+    const wrapper = document.createElement("div");
+    wrapper.className = "ofv-markdown-code-block";
+    pre.replaceWith(wrapper);
+    pre.classList.add("ofv-markdown-code-pre");
+
+    const gutter = document.createElement("span");
+    gutter.className = "ofv-markdown-code-gutter";
+    gutter.setAttribute("aria-hidden", "true");
+    // A final newline terminates the last code line; it is not an extra row.
+    gutter.textContent = createLineNumbers(countLines(source.replace(/(?:\r\n|\r|\n)$/, "")));
+    pre.prepend(gutter);
+
+    const toolbar = document.createElement("div");
+    toolbar.className = "ofv-markdown-code-toolbar";
+    const status = document.createElement("span");
+    status.className = "ofv-markdown-code-status";
+    status.setAttribute("role", "status");
+    const copy = document.createElement("button");
+    copy.type = "button";
+    copy.className = "ofv-code-action ofv-markdown-code-copy";
+    copy.textContent = messages.textCopy;
+    copy.addEventListener("click", async () => {
+      copy.disabled = true;
+      status.textContent = "";
+      try {
+        await copyToClipboard(source);
+        status.textContent = messages.textCopied;
+      } catch {
+        status.textContent = messages.textCopyFailed;
+      } finally {
+        copy.disabled = false;
+      }
+    });
+    toolbar.append(status, copy);
+    wrapper.append(toolbar, pre);
+  }
 }
 
 function getPrismLanguageFromElement(element: Element | null): string | undefined {
