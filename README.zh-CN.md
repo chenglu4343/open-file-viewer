@@ -500,6 +500,26 @@ officePlugin({
 
 `reason` 目前会标记为 `complex-docx` 或 `legacy-office`。如果转换接口返回的是可访问的 PDF URL，也可以直接 `return { url, fileName: "preview.pdf", mimeType: "application/pdf" }`。
 
+远程大文件可以配置 `convertRemote`。它会在浏览器下载原始 Office 文件之前执行，业务后端可接收源 URL，完成转换后返回支持 Range 请求的 PDF URL；返回 `null` 时仍回退到浏览器本地解析。这样 300MB PPTX 不必先完整下载并在前端解压：
+
+```ts
+officePlugin({
+  pdf: { workerSrc: pdfWorkerSrc },
+  maxZoom: 5,
+  async convertRemote({ file }) {
+    const response = await fetch("/api/office/convert-url", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url: file.url, name: file.name })
+    });
+    if (!response.ok) throw new Error("Office 转 PDF 失败");
+    return response.json(); // { url, fileName, mimeType: "application/pdf" }
+  }
+});
+```
+
+`maxZoom` 用于自定义 Office 工具栏的最大缩放倍数，默认值仍为 `3`（300%）。
+
 视频预览中，MP4、WebM、MOV 等浏览器原生格式不需要额外依赖；HLS 由内置的 `hls.js` 处理；FLV 和 MPEG-TS/M2TS 属于可选增强能力，需要业务项目自行安装 `mpegts.js`。未安装时会展示下载 fallback，避免安装 `@open-file-viewer/core` 时被 `mpegts.js` 的 git 子依赖影响。
 
 如果业务确实需要 FLV/M2TS，并且 pnpm 11 开启了 `blockExoticSubdeps`，可以在业务项目中覆盖 `mpegts.js` 的传递依赖：

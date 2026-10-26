@@ -500,6 +500,7 @@ const plugins = [imagePlugin(), pdfPlugin({ workerSrc }), officePlugin(), textPl
               <div><strong>next()</strong><code>Promise&lt;void&gt;</code><span data-i18n="api.instance.next">Move to the next file in the queue.</span></div>
               <div><strong>previous()</strong><code>Promise&lt;void&gt;</code><span data-i18n="api.instance.previous">Move to the previous file in the queue.</span></div>
               <div><strong>goTo(index)</strong><code>Promise&lt;void&gt;</code><span data-i18n="api.instance.goTo">Move to a specific queue index.</span></div>
+              <div><strong>goToPage(page)</strong><code>boolean</code><span data-i18n="api.instance.goToPage">Move to a 1-based page in the active paginated preview; returns false for non-paginated formats.</span></div>
               <div><strong>getCurrentIndex()</strong><code>number</code><span data-i18n="api.instance.getIndex">Return the current queue index.</span></div>
               <div><strong>resize()</strong><code>void</code><span data-i18n="api.instance.resize">Ask the active plugin to recalculate after the container size changes.</span></div>
               <div><strong>destroy()</strong><code>void</code><span data-i18n="api.instance.destroy">Destroy the viewer and release event listeners and plugin resources.</span></div>

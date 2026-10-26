@@ -412,6 +412,16 @@
   color: inherit;
 }
 
+/* PDF text is painted by the canvas underneath a transparent text layer. */
+.ofv-pdf-text-layer .ofv-search-match {
+  background: rgba(250, 204, 21, 0.42);
+  color: transparent;
+}
+
+.ofv-theme-dark .ofv-pdf-text-layer .ofv-search-match {
+  background: rgba(251, 191, 36, 0.36);
+}
+
 .ofv-print-frame {
   position: fixed;
   right: 0;

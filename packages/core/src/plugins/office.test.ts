@@ -2829,6 +2829,33 @@ describe("officePlugin", () => {
     expect(panel?.style.getPropertyValue("--ofv-office-zoom")).toBe("1");
   });
 
+  it("allows the Office zoom ceiling to be configured", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+
+    createViewer({
+      container,
+      file: new Blob(["docx"], {
+        type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      }),
+      fileName: "custom-zoom.docx",
+      toolbar: true,
+      plugins: [officePlugin({ maxZoom: 5 })]
+    });
+
+    await waitFor(() => Boolean(container.querySelector(".ofv-docx-document")));
+
+    const panel = container.querySelector<HTMLElement>(".ofv-office");
+    const zoomIn = container.querySelector<HTMLButtonElement>('button[aria-label="Zoom in"]');
+    for (let index = 0; index < 40; index += 1) {
+      zoomIn?.click();
+    }
+
+    expect(panel?.style.getPropertyValue("--ofv-office-zoom")).toBe("5");
+    expect(container.querySelector<HTMLButtonElement>('button[aria-label="Reset zoom"]')?.textContent).toBe("500%");
+    expect(zoomIn?.disabled).toBe(true);
+  });
+
   it("keeps contain-fit DOCX scaling stable when zooming out a single page", async () => {
     const container = document.createElement("div");
     document.body.append(container);
@@ -3133,6 +3160,41 @@ describe("officePlugin", () => {
     expect(container.querySelector(".ofv-pdf-viewer-title")?.textContent).toBe("High-fidelity Office conversion preview");
     expect(container.querySelector(".ofv-docx-textbox-page")).toBeNull();
     expect(pdfjs.getDocument).toHaveBeenCalled();
+  });
+
+  it("can convert a remote Office file before downloading the original package", async () => {
+    vi.stubGlobal("IntersectionObserver", undefined);
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({} as CanvasRenderingContext2D);
+    const container = document.createElement("div");
+    const pdfjs = createPdfJsMock();
+    const convertRemote = vi.fn(() => ({
+      url: "https://cdn.example.com/previews/large-deck.pdf",
+      fileName: "large-deck.pdf",
+      mimeType: "application/pdf"
+    }));
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    document.body.append(container);
+
+    createViewer({
+      container,
+      file: "https://cdn.example.com/uploads/large-deck.pptx",
+      plugins: [officePlugin({ convertRemote, pdf: { pdfjs } })]
+    });
+
+    await waitFor(() => container.querySelectorAll("canvas.ofv-pdf-page").length === 1, 5000);
+
+    expect(convertRemote).toHaveBeenCalledWith({
+      extension: "pptx",
+      reason: "remote-office",
+      file: expect.objectContaining({
+        name: "large-deck.pptx",
+        url: "https://cdn.example.com/uploads/large-deck.pptx"
+      })
+    });
+    expect(fetchSpy).not.toHaveBeenCalledWith("https://cdn.example.com/uploads/large-deck.pptx");
+    expect(pdfjs.getDocument).toHaveBeenCalledWith(
+      expect.objectContaining({ url: "https://cdn.example.com/previews/large-deck.pdf" })
+    );
   });
 
   it("falls back when the high fidelity DOCX renderer misses rich textbox content", async () => {

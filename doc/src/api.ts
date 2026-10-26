@@ -116,6 +116,7 @@ const zhTranslations: Record<string, string> = {
   "api.instance.next": "切换到队列中的下一个文件。",
   "api.instance.previous": "切换到队列中的上一个文件。",
   "api.instance.goTo": "切换到指定下标。",
+  "api.instance.goToPage": "跳转到当前分页预览的指定页码（从 1 开始）；非分页格式返回 false。",
   "api.instance.getIndex": "返回当前队列下标。",
   "api.instance.resize": "容器尺寸变化后主动通知当前插件重新计算布局。",
   "api.instance.destroy": "销毁预览器、清理事件和插件资源。",

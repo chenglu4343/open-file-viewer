@@ -409,6 +409,8 @@ Legacy `ppt` / `pps` files use a local OLE and PowerPoint Binary File Format pre
 
 Markdown code blocks display line numbers and a copy button in the upper-right corner. Copying preserves the code text and excludes line numbers; button labels and feedback use the existing `textCopy`, `textCopied`, and `textCopyFailed` messages.
 
+Office previews accept `officePlugin({ maxZoom })`; the default ceiling remains `3` (300%). For large remote Office files, `officePlugin({ convertRemote })` can call a backend conversion service before the browser downloads the original package and return a range-enabled PDF URL for progressive preview.
+
 Plugin order matters because the first matching plugin renders the file. For example, `csv` and `tsv` can match both `textPlugin()` and `officePlugin()`; place `officePlugin()` earlier if you want spreadsheet-style table preview.
 
 ### DWG / DWF Preview Model

@@ -145,6 +145,12 @@ export interface OfficeConversionContext {
   reason: "complex-docx" | "legacy-office" | "manual";
 }
 
+export interface OfficeRemoteConversionContext {
+  file: PreviewContext["file"];
+  extension: string;
+  reason: "remote-office";
+}
+
 export type OfficeConversionResult =
   | Blob
   | ArrayBuffer
@@ -159,7 +165,14 @@ export type OfficeConversionResult =
 
 export interface OfficePluginOptions {
   convert?: (ctx: OfficeConversionContext) => Promise<OfficeConversionResult | null | undefined> | OfficeConversionResult | null | undefined;
+  /**
+   * Convert a remote Office URL before the browser downloads the original file.
+   * Returning null falls back to the built-in browser renderer.
+   */
+  convertRemote?: (ctx: OfficeRemoteConversionContext) => Promise<OfficeConversionResult | null | undefined> | OfficeConversionResult | null | undefined;
   preferConversion?: boolean | ((ctx: OfficeConversionContext) => boolean | Promise<boolean>);
+  /** Maximum toolbar zoom for Office previews. Defaults to 3 (300%). */
+  maxZoom?: number;
   docx?: Partial<docxPreview.Options>;
   pdf?: PdfPluginOptions;
 }
@@ -187,6 +200,22 @@ export function officePlugin(options: OfficePluginOptions = {}): PreviewPlugin {
       const panel = createPanel("ofv-office");
       ctx.viewport.append(panel);
       const extension = resolveFormat(ctx.file, officeMimeFormatMap);
+      let delegatedInstance: PreviewInstance | undefined;
+      if (ctx.file.url && options.convertRemote) {
+        const converted = await options.convertRemote({
+          file: ctx.file,
+          extension,
+          reason: "remote-office"
+        });
+        if (converted) {
+          delegatedInstance = await renderConvertedOfficeResult(panel, ctx, options, converted);
+        }
+      }
+      if (delegatedInstance) {
+        ctx.toolbar?.refreshCommandSupport();
+        return createDelegatedOfficeInstance(panel, delegatedInstance);
+      }
+
       const arrayBuffer = await readArrayBuffer(ctx.file);
       const packageFormat = shouldSniffPackagedOffice(extension) ? await detectPackagedOfficeFormat(arrayBuffer) : undefined;
       const wordHtml = packageFormat ? undefined : detectWordHtmlDocument(extension, arrayBuffer);
@@ -194,7 +223,6 @@ export function officePlugin(options: OfficePluginOptions = {}): PreviewPlugin {
       let disposeDocxFit: (() => void) | undefined;
       let disposeLegacyPresentation: (() => void) | undefined;
       let disposePptx: (() => void) | undefined;
-      let delegatedInstance: PreviewInstance | undefined;
 
       const conversionContext = wordXml ? undefined : await createOfficeConversionContext(ctx, arrayBuffer, extension, packageFormat);
       if (conversionContext && (await shouldUseOfficeConversion(options, conversionContext))) {
@@ -252,7 +280,7 @@ export function officePlugin(options: OfficePluginOptions = {}): PreviewPlugin {
         renderUnsupportedOffice(panel, extension || ctx.file.extension || "office", ctx.options.messages);
       }
 
-      const controller = createOfficeZoomController(panel, ctx);
+      const controller = createOfficeZoomController(panel, ctx, options.maxZoom);
       ctx.toolbar?.refreshCommandSupport();
 
       return {
@@ -285,6 +313,27 @@ export function officePlugin(options: OfficePluginOptions = {}): PreviewPlugin {
           panel.remove();
         }
       };
+    }
+  };
+}
+
+function createDelegatedOfficeInstance(panel: HTMLElement, delegatedInstance: PreviewInstance): PreviewInstance {
+  return {
+    goToPage(page) {
+      return delegatedInstance.goToPage?.(page) ?? false;
+    },
+    canCommand(command) {
+      return delegatedInstance.canCommand?.(command) ?? false;
+    },
+    command(command) {
+      return delegatedInstance.command?.(command) ?? false;
+    },
+    preparePrint() {
+      return delegatedInstance.preparePrint?.();
+    },
+    destroy() {
+      delegatedInstance.destroy();
+      panel.remove();
     }
   };
 }
@@ -327,7 +376,16 @@ async function renderConvertedOfficePreview(
   if (!options.convert) {
     throw new Error("Office conversion handler is not configured.");
   }
-  const converted = normalizeOfficeConversionResult(await options.convert(conversionContext), ctx.file.name);
+  return renderConvertedOfficeResult(panel, ctx, options, await options.convert(conversionContext));
+}
+
+async function renderConvertedOfficeResult(
+  panel: HTMLElement,
+  ctx: PreviewContext,
+  options: OfficePluginOptions,
+  result: OfficeConversionResult | null | undefined
+): Promise<PreviewInstance> {
+  const converted = normalizeOfficeConversionResult(result, ctx.file.name);
   if (!converted) {
     throw new Error("Office conversion handler did not return a previewable file.");
   }
@@ -410,7 +468,8 @@ function stripFileExtension(fileName: string): string {
 
 function createOfficeZoomController(
   panel: HTMLElement,
-  ctx: Pick<PreviewContext, "options" | "toolbar">
+  ctx: Pick<PreviewContext, "options" | "toolbar">,
+  configuredMaxZoom?: number
 ): {
   canCommand: (command: PreviewCommand) => boolean;
   command: (command: PreviewCommand) => boolean;
@@ -425,7 +484,8 @@ function createOfficeZoomController(
     return undefined;
   }
 
-  let zoom = getInitialZoom(ctx, 0.5, 3);
+  const maxZoom = normalizeOfficeMaxZoom(configuredMaxZoom);
+  let zoom = getInitialZoom(ctx, 0.5, maxZoom);
   const presentationPages = () => Array.from(
     panel.querySelectorAll<HTMLElement>(
       ".ofv-pptx-viewer > div[data-slide-index], .ofv-ppt-binary-slide, .ofv-slide"
@@ -455,17 +515,27 @@ function createOfficeZoomController(
     }
     ctx.toolbar?.setZoom(zoom);
     restorePageScrollAnchor(scroller, pages, anchor);
+    ctx.toolbar?.refreshCommandSupport();
   };
   apply();
   panel.addEventListener("ofv-pptx-render-complete", apply);
 
   return {
     canCommand(command) {
-      return command === "zoom-in" || command === "zoom-out" || command === "zoom-reset";
+      if (command === "zoom-in") {
+        return zoom < maxZoom;
+      }
+      if (command === "zoom-out") {
+        return zoom > 0.5;
+      }
+      if (command === "zoom-reset") {
+        return zoom !== 1;
+      }
+      return false;
     },
     command(command) {
       if (command === "zoom-in") {
-        zoom = Math.min(3, Number((zoom + 0.12).toFixed(2)));
+        zoom = Math.min(maxZoom, Number((zoom + 0.12).toFixed(2)));
         apply();
         return true;
       }
@@ -486,6 +556,10 @@ function createOfficeZoomController(
       ctx.toolbar?.setZoom(undefined);
     }
   };
+}
+
+function normalizeOfficeMaxZoom(value: number | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(1, value) : 3;
 }
 
 function getPresentationScroller(panel: HTMLElement): HTMLElement {

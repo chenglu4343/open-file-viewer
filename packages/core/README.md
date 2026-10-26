@@ -340,6 +340,29 @@ Open File Viewer does not upload files by default. The conversion hook is only c
 explicitly configure it, and currently targets `complex-docx` and `legacy-office` cases. You can also
 return `{ url, fileName, mimeType: "application/pdf" }` when your service stores the converted PDF.
 
+For very large remote Office files, use `convertRemote` instead. It runs before the browser fetches
+the original Office package, so a backend can convert the source URL and return a range-enabled PDF
+URL. Returning `null` falls back to the browser renderer. This avoids downloading and unzipping a
+large PPTX twice in the frontend:
+
+```ts
+officePlugin({
+  pdf: { workerSrc: pdfWorkerSrc },
+  maxZoom: 5,
+  async convertRemote({ file }) {
+    const response = await fetch("/api/office/convert-url", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url: file.url, name: file.name })
+    });
+    if (!response.ok) throw new Error("Office conversion failed");
+    return response.json(); // { url, fileName, mimeType: "application/pdf" }
+  }
+});
+```
+
+`maxZoom` controls the Office toolbar zoom ceiling and defaults to `3` (300%).
+
 ## CAD Customization
 
 For complex drawings, install the optional WebGL engine and host its two Worker

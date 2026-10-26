@@ -196,6 +196,15 @@ describe("core responsive styles", () => {
     expect(rule(".ofv-ofd-page svg")).toContain("transform-origin: center");
   });
 
+  it("keeps PDF search matches translucent so the canvas text stays readable", () => {
+    const pdfSearchMatch = rule(".ofv-pdf-text-layer .ofv-search-match");
+    expect(pdfSearchMatch).toContain("background: rgba(250, 204, 21, 0.42)");
+    expect(pdfSearchMatch).toContain("color: transparent");
+    expect(rule(".ofv-theme-dark .ofv-pdf-text-layer .ofv-search-match")).toContain(
+      "background: rgba(251, 191, 36, 0.36)"
+    );
+  });
+
   it("keeps complex preview panels from widening narrow containers", () => {
     expect(rule(".ofv-panel")).toContain("max-width: 100%");
     expect(rule(".ofv-section")).toContain("min-width: 0");
