@@ -1491,6 +1491,7 @@ async function normalizeDocxLayout(container: HTMLElement, arrayBuffer: ArrayBuf
   normalizeDocxEastAsiaFontStyles(styleContainer, hints.eastAsiaFonts);
   normalizeDocxNumberingStyles(styleContainer);
   repairDocxDefaultPageMargins(container, hints.needsDefaultPageMargins);
+  repairDocxDefaultPageSize(container, hints.needsDefaultPageSize);
   repairDocxSvgImageAlternatives(container, svgImageAlternatives);
   repairUnexpectedDocxTableTextDirections(container, hints.hasVerticalTextDirection);
   repairDocxDiagonalCellBorders(container, hints.diagonalCellBorders);
@@ -1832,6 +1833,7 @@ type DocxLayoutHints = {
   }>;
   sectionBreakParagraphIndexes: number[];
   needsDefaultPageMargins: boolean;
+  needsDefaultPageSize: boolean;
   hasVerticalTextDirection: boolean;
 };
 
@@ -1867,6 +1869,7 @@ async function readDocxLayoutHints(arrayBuffer: ArrayBuffer): Promise<DocxLayout
       mergedCellEmptyParagraphs: documentXml ? extractDocxMergedCellEmptyParagraphs(documentXml) : [],
       sectionBreakParagraphIndexes: documentXml ? extractDocxSectionBreakParagraphIndexes(documentXml) : [],
       needsDefaultPageMargins: Boolean(documentXml && /<w:sectPr\b/.test(documentXml) && !/<w:pgMar\b/.test(documentXml)),
+      needsDefaultPageSize: Boolean(documentXml && /<w:sectPr\b/.test(documentXml) && !/<w:pgSz\b/.test(documentXml)),
       hasVerticalTextDirection: Boolean(documentXml && /<w:textDirection\b/.test(documentXml))
     };
   } catch {
@@ -1884,6 +1887,7 @@ async function readDocxLayoutHints(arrayBuffer: ArrayBuffer): Promise<DocxLayout
       mergedCellEmptyParagraphs: [],
       sectionBreakParagraphIndexes: [],
       needsDefaultPageMargins: false,
+      needsDefaultPageSize: false,
       hasVerticalTextDirection: false
     };
   }
@@ -1896,6 +1900,25 @@ function repairDocxDefaultPageMargins(container: HTMLElement, needsDefaultPageMa
   for (const page of container.querySelectorAll<HTMLElement>("section.ofv-docx")) {
     if (!page.style.padding && !page.style.paddingTop && !page.style.paddingRight && !page.style.paddingBottom && !page.style.paddingLeft) {
       page.style.padding = "72pt 90pt";
+    }
+  }
+}
+
+// docx-preview only sets page width/minHeight when the section carries a
+// `w:pgSz` element. Generated documents often ship an empty `w:sectPr`, so the
+// page stays shrink-wrapped around its padding and collapses into a thin strip.
+// Fall back to Word's default US Letter page so the text column keeps a
+// readable width.
+function repairDocxDefaultPageSize(container: HTMLElement, needsDefaultPageSize: boolean): void {
+  if (!needsDefaultPageSize) {
+    return;
+  }
+  for (const page of container.querySelectorAll<HTMLElement>("section.ofv-docx")) {
+    if (!page.style.width && !page.style.minWidth) {
+      page.style.width = "816px";
+    }
+    if (!page.style.minHeight && !page.style.height) {
+      page.style.minHeight = "1056px";
     }
   }
 }

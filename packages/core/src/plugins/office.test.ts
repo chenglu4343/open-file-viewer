@@ -12,6 +12,7 @@ const shouldHangMammoth = vi.hoisted(() => ({ value: false }));
 const shouldRenderBlankDocxPreview = vi.hoisted(() => ({ value: false }));
 const docxPreviewImageSrc = vi.hoisted(() => ({ value: "" }));
 const shouldRenderVerticalDocxTable = vi.hoisted(() => ({ value: false }));
+const shouldRenderUnsizedDocxPage = vi.hoisted(() => ({ value: false }));
 const utifMock = vi.hoisted(() => ({
   decode: vi.fn(),
   decodeImage: vi.fn(),
@@ -37,8 +38,11 @@ const renderDocxAsync = vi.hoisted(() =>
     wrapper.className = "ofv-docx-wrapper";
     const page = document.createElement("section");
     page.className = "ofv-docx";
-    page.style.width = "794px";
-    page.style.height = "1123px";
+    // docx-preview skips page sizing entirely when the section has no `w:pgSz`.
+    if (!shouldRenderUnsizedDocxPage.value) {
+      page.style.width = "794px";
+      page.style.height = "1123px";
+    }
     if (shouldRenderBlankDocxPreview.value) {
       wrapper.append(page);
       bodyContainer.append(wrapper);
@@ -398,6 +402,7 @@ describe("officePlugin", () => {
     shouldRenderBlankDocxPreview.value = false;
     docxPreviewImageSrc.value = "";
     shouldRenderVerticalDocxTable.value = false;
+    shouldRenderUnsizedDocxPage.value = false;
     pptxRenderMode.value = "normal";
     utifMock.decode.mockReset();
     utifMock.decodeImage.mockReset();
@@ -1390,6 +1395,44 @@ describe("officePlugin", () => {
     await waitFor(() => Boolean(container.querySelector("section.ofv-docx")));
 
     expect(container.querySelector<HTMLElement>("section.ofv-docx")?.style.padding).toBe("");
+  });
+
+  it("restores Word default page size when a generated DOCX omits pgSz", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    shouldRenderUnsizedDocxPage.value = true;
+
+    createViewer({
+      container,
+      file: await createDocxWithSection("", false),
+      fileName: "no-page-size.docx",
+      plugins: [officePlugin()]
+    });
+
+    await waitFor(() => Boolean(container.querySelector("section.ofv-docx")));
+
+    const page = container.querySelector<HTMLElement>("section.ofv-docx");
+    expect(page?.style.width).toBe("816px");
+    expect(page?.style.minHeight).toBe("1056px");
+  });
+
+  it("preserves an explicit page size in DOCX files", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    shouldRenderUnsizedDocxPage.value = true;
+
+    createViewer({
+      container,
+      file: await createDocxWithSection('<w:pgSz w:w="11906" w:h="16838"/>', false),
+      fileName: "explicit-page-size.docx",
+      plugins: [officePlugin()]
+    });
+
+    await waitFor(() => Boolean(container.querySelector("section.ofv-docx")));
+
+    const page = container.querySelector<HTMLElement>("section.ofv-docx");
+    expect(page?.style.width).not.toBe("816px");
+    expect(page?.style.minHeight).not.toBe("1056px");
   });
 
   it("prefers an embedded SVG alternative over its lossy DOCX fallback image", async () => {
@@ -4283,7 +4326,7 @@ async function createMinimalDocx(text: string, footerText?: string): Promise<Blo
   });
 }
 
-async function createDocxWithSection(pageMargins = ""): Promise<Blob> {
+async function createDocxWithSection(pageMargins = "", includePageSize = true): Promise<Blob> {
   const zip = new JSZip();
   zip.file(
     "word/document.xml",
@@ -4291,7 +4334,7 @@ async function createDocxWithSection(pageMargins = ""): Promise<Blob> {
       <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
         <w:body>
           <w:p><w:r><w:t>Generated document</w:t></w:r></w:p>
-          <w:sectPr><w:pgSz w:w="11906" w:h="16838"/>${pageMargins}</w:sectPr>
+          <w:sectPr>${includePageSize ? '<w:pgSz w:w="11906" w:h="16838"/>' : ""}${pageMargins}</w:sectPr>
         </w:body>
       </w:document>`
   );
