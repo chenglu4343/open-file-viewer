@@ -6193,9 +6193,6 @@ a.ofv-xmind-topic-title:hover {
   justify-content: center;
   overflow: hidden;
   box-sizing: border-box;
-  /* Keeps layout and paint work scoped to this page instead of forcing the
-     whole 1000+ page subtree to be revisited on every change. */
-  contain: layout style paint;
 }
 
 .ofv-pdf-skeleton {
@@ -6270,8 +6267,6 @@ a.ofv-xmind-topic-title:hover {
   user-select: text;
   -webkit-text-size-adjust: none;
   text-size-adjust: none;
-  /* Span insertion stays local to this page's text layer. */
-  contain: layout style paint;
 }
 
 .ofv-pdf-text-layer span {
